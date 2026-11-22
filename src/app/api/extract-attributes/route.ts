@@ -5,7 +5,7 @@ import { evaluateEligibility } from "@/lib/matcher";
 
 export interface ExtractedAttribute<T> {
   value: T;
-  confidence: number; // 0.0 to 1.0
+  confidence: number;
   rawSnippet?: string;
   normalizedNote?: string;
 }
@@ -58,7 +58,7 @@ export async function POST(req: NextRequest) {
 
     // Fallback if no API key is provided locally
     if (!apiKey || apiKey === "your_gemini_api_key_here") {
-      const fallback = getMockExtraction("farmer-ramesh", startTime);
+      const fallback = getMockExtraction("farmer-mallesh", startTime);
       fallback.source = "offline-local-sandbox";
       return NextResponse.json(fallback);
     }
@@ -68,7 +68,7 @@ export async function POST(req: NextRequest) {
 
     const systemPrompt = `
       You are an expert Government Document Verification & Entity Extraction Engine adhering to IEEE 7001 algorithmic standards.
-      Analyze this official Indian document (Land Record/7-12/Patta, Ration Card, Income Certificate, Caste Certificate, Aadhaar).
+      Analyze this official Indian document (Telangana Dharani Land Record, MeeSeva Certificate, Food Security Card, Aadhaar).
       
       Extract every demographic and economic field with:
       - 'value': canonical parsed value
@@ -78,66 +78,59 @@ export async function POST(req: NextRequest) {
       Output strictly valid JSON with this exact structure:
       {
         "documentMetadata": {
-          "detectedType": "Land Record (Patta/7-12)" | "Income Certificate" | "Ration Card" | "Aadhaar Card" | "Other",
-          "issuingState": "e.g. Madhya Pradesh, Uttar Pradesh, etc.",
-          "documentId": "ID or reference number if visible, otherwise null",
+          "detectedType": "Telangana Dharani Pattadar Passbook" | "MeeSeva Income Certificate" | "Food Security White Card",
+          "issuingState": "Telangana",
+          "documentId": string,
           "overallConfidence": number
         },
         "attributes": {
-          "fullName": { "value": string or null, "confidence": number, "rawSnippet": string },
-          "age": { "value": number or null, "confidence": number, "rawSnippet": string },
+          "fullName": { "value": string | null, "confidence": number, "rawSnippet": string },
+          "age": { "value": number | null, "confidence": number, "rawSnippet": string },
           "gender": { "value": "male" | "female" | "other" | null, "confidence": number, "rawSnippet": string },
           "occupation": { "value": "farmer" | "student" | "laborer" | "unemployed" | "artisan" | "other", "confidence": number, "rawSnippet": string },
-          "annualIncome": { "value": number (in INR) or null, "confidence": number, "rawSnippet": string },
-          "landHoldingAcres": { "value": number (convert hectares to acres if needed: 1 ha = 2.47 acres), "confidence": number, "rawSnippet": string },
+          "annualIncome": { "value": number | null, "confidence": number, "rawSnippet": string },
+          "landHoldingAcres": { "value": number, "confidence": number, "rawSnippet": string },
           "socialCategory": { "value": "General" | "OBC" | "SC" | "ST" | "EWS" | null, "confidence": number, "rawSnippet": string },
-          "domicileState": { "value": string or null, "confidence": number, "rawSnippet": string }
+          "domicileState": { "value": "Telangana", "confidence": number, "rawSnippet": string }
         }
       }
-      
-      Rules:
-      - If land size is stated in hectares, multiply by 2.47 to get acres.
-      - Return ONLY the JSON object. Do not wrap in markdown \`\`\` blocks.
     `;
 
-    const contents: any[] = [{ text: systemPrompt }];
-
+    const parts: any[] = [{ text: systemPrompt }];
     if (imageBase64) {
-      contents.push({
+      parts.push({
         inlineData: {
-          data: imageBase64.replace(/^data:image\/\w+;base64,/, ""),
-          mimeType: mimeType || "image/jpeg"
+          mimeType: mimeType || "image/jpeg",
+          data: imageBase64.replace(/^data:image\/\w+;base64,/, "")
         }
       });
     }
-
     if (rawText) {
-      contents.push({ text: `Analyze this citizen statement / text transcript: "${rawText}"` });
+      parts.push({ text: `Document raw textual transcript: ${rawText}` });
     }
 
     const response = await ai.models.generateContent({
       model: "gemini-2.5-flash",
-      contents: [{ role: "user", parts: contents }]
+      contents: [{ role: "user", parts }]
     });
 
-    const cleanedText = (response.text || "{}").replace(/```json|```/g, "").trim();
-    const parsedData = JSON.parse(cleanedText);
+    const responseText = response.text || "{}";
+    const cleaned = responseText.replace(/```json|```/g, "").trim();
+    const parsedData = JSON.parse(cleaned);
 
-    // 3. CANONICAL NORMALIZATION TO STANDARD CITIZEN PROFILE
     const normalizedProfile: CitizenProfile = {
-      fullName: parsedData.attributes?.fullName?.value || "Unverified Citizen",
+      fullName: parsedData.attributes?.fullName?.value || "Telangana Citizen",
       age: parsedData.attributes?.age?.value || null,
       gender: parsedData.attributes?.gender?.value || null,
       occupation: parsedData.attributes?.occupation?.value || "other",
       estimatedAnnualIncome: parsedData.attributes?.annualIncome?.value || null,
       landOwnedAcres: parsedData.attributes?.landHoldingAcres?.value || 0,
       socialCategory: parsedData.attributes?.socialCategory?.value || "General",
-      state: parsedData.attributes?.domicileState?.value || parsedData.documentMetadata?.issuingState || "India",
-      extractedDocumentType: parsedData.documentMetadata?.detectedType || "Official Document",
+      state: "Telangana",
+      extractedDocumentType: parsedData.documentMetadata?.detectedType || "Telangana Official Document",
       confidenceScore: Math.round((parsedData.documentMetadata?.overallConfidence || 0.95) * 100)
     };
 
-    // 4. STATUTORY ELIGIBILITY EVALUATION
     const matchedSchemes = evaluateEligibility(normalizedProfile);
 
     const payload: DetailedExtractionResponse = {
@@ -145,9 +138,9 @@ export async function POST(req: NextRequest) {
       source: "gemini-2.5-flash-multimodal-engine",
       latencyMs: Date.now() - startTime,
       documentMetadata: parsedData.documentMetadata || {
-        detectedType: "Official Document",
-        issuingState: "India",
-        documentId: "DOC-2026-IN",
+        detectedType: "Telangana Official Document",
+        issuingState: "Telangana",
+        documentId: "TG-DOC-2026",
         overallConfidence: 0.95
       },
       attributes: parsedData.attributes,
@@ -158,8 +151,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(payload);
   } catch (error) {
     console.error("Extraction Pipeline Error:", error);
-    // Bulletproof fallback
-    const fallback = getMockExtraction("farmer-ramesh", startTime);
+    const fallback = getMockExtraction("farmer-mallesh", startTime);
     fallback.source = "resilience-fallback-engine";
     return NextResponse.json(fallback);
   }
@@ -171,93 +163,99 @@ function getMockExtraction(personaId: string, startTime: number): DetailedExtrac
   let metadata: any;
   let attributes: any;
 
-  if (personaId === "student-priya") {
+  if (personaId === "student-lavanya" || personaId === "student-priya") {
     profile = {
-      fullName: "Priya Kumari Sharma",
-      age: 19,
+      fullName: "Chintala Lavanya",
+      age: 20,
       gender: "female",
       occupation: "student",
-      estimatedAnnualIncome: 180000,
-      landOwnedAcres: 0,
-      socialCategory: "EWS",
-      state: "Uttar Pradesh",
-      extractedDocumentType: "Tehsildar Income & Category Certificate",
-      confidenceScore: 99
-    };
-    metadata = {
-      detectedType: "Income & Asset Certificate",
-      issuingState: "Uttar Pradesh",
-      documentId: "UP-INC-2026-90412",
-      overallConfidence: 0.99
-    };
-    attributes = {
-      fullName: { value: "Priya Kumari Sharma", confidence: 0.99, rawSnippet: "Beneficiary Name: Priya Kumari Sharma" },
-      age: { value: 19, confidence: 0.98, rawSnippet: "Age: 19 Years" },
-      gender: { value: "female", confidence: 0.99, rawSnippet: "Sex: Female" },
-      occupation: { value: "student", confidence: 0.99, rawSnippet: "Occupation: Student (B.Tech 1st Year)" },
-      annualIncome: { value: 180000, confidence: 0.98, rawSnippet: "Total Family Annual Income: ₹1,80,000" },
-      landHoldingAcres: { value: 0, confidence: 1.0, rawSnippet: "Agricultural Land Owned: 0.00 Acres" },
-      socialCategory: { value: "EWS", confidence: 0.99, rawSnippet: "Social Category: Economically Weaker Section (EWS)" },
-      domicileState: { value: "Uttar Pradesh", confidence: 0.99, rawSnippet: "Govt of Uttar Pradesh" }
-    };
-  } else if (personaId === "widow-lakshmi") {
-    profile = {
-      fullName: "Lakshmi Bai Rathore",
-      age: 64,
-      gender: "female",
-      occupation: "unemployed",
-      estimatedAnnualIncome: 35000,
+      estimatedAnnualIncome: 160000,
       landOwnedAcres: 0,
       socialCategory: "SC",
-      state: "Rajasthan",
-      extractedDocumentType: "Antyodaya BPL Ration Card",
-      confidenceScore: 96
+      state: "Telangana",
+      extractedDocumentType: "Telangana MeeSeva Income & Caste Certificate",
+      confidenceScore: 98,
+      aadhaarMasked: "XXXX-XXXX-8821",
+      sha256VerificationHash: "0x4B219AC7...TG"
     };
     metadata = {
-      detectedType: "Antyodaya Anna Yojana (AAY) BPL Card",
-      issuingState: "Rajasthan",
-      documentId: "RJ-BPL-2026-3391",
-      overallConfidence: 0.96
-    };
-    attributes = {
-      fullName: { value: "Lakshmi Bai Rathore", confidence: 0.96, rawSnippet: "Head of Household: Lakshmi Bai" },
-      age: { value: 64, confidence: 0.94, rawSnippet: "DOB / Age: 64 Yrs" },
-      gender: { value: "female", confidence: 0.99, rawSnippet: "Gender: Female" },
-      occupation: { value: "unemployed", confidence: 0.92, rawSnippet: "Livelihood: Destitute / Artisan" },
-      annualIncome: { value: 35000, confidence: 0.95, rawSnippet: "Declared Income: ₹35,000 / Year" },
-      landHoldingAcres: { value: 0, confidence: 1.0, rawSnippet: "Homeless / Landless Category" },
-      socialCategory: { value: "SC", confidence: 0.97, rawSnippet: "Category: Scheduled Caste (SC)" },
-      domicileState: { value: "Rajasthan", confidence: 0.98, rawSnippet: "State of Rajasthan" }
-    };
-  } else {
-    // Default: Marginal Farmer Ramesh
-    profile = {
-      fullName: "Rameshwar Prasad Patel",
-      age: 51,
-      gender: "male",
-      occupation: "farmer",
-      estimatedAnnualIncome: 145000,
-      landOwnedAcres: 1.8,
-      socialCategory: "OBC",
-      state: "Madhya Pradesh",
-      extractedDocumentType: "Khasra Khatauni (7/12 Extract)",
-      confidenceScore: 98
-    };
-    metadata = {
-      detectedType: "Revenue Land Record (7/12 Patta)",
-      issuingState: "Madhya Pradesh",
-      documentId: "MP-REV-2026-78912",
+      detectedType: "MeeSeva Income & Caste Certificate",
+      issuingState: "Telangana",
+      documentId: "TG-MEESEVA-2026-88214",
       overallConfidence: 0.98
     };
     attributes = {
-      fullName: { value: "Rameshwar Prasad Patel", confidence: 0.99, rawSnippet: "Landholder Name: Rameshwar Prasad Patel" },
-      age: { value: 51, confidence: 0.92, rawSnippet: "Age: 51 Years" },
+      fullName: { value: "Chintala Lavanya", confidence: 0.99, rawSnippet: "Student Name: Chintala Lavanya" },
+      age: { value: 20, confidence: 0.98, rawSnippet: "Age: 20 Years" },
+      gender: { value: "female", confidence: 0.99, rawSnippet: "Sex: Female" },
+      occupation: { value: "student", confidence: 0.99, rawSnippet: "Occupation: Student (B.Tech 3rd Year JNTU)" },
+      annualIncome: { value: 160000, confidence: 0.98, rawSnippet: "Annual Family Income: ₹1,60,000" },
+      landHoldingAcres: { value: 0, confidence: 1.0, rawSnippet: "Agricultural Land: Nil" },
+      socialCategory: { value: "SC", confidence: 0.99, rawSnippet: "Caste: Scheduled Caste (SC - Madiga)" },
+      domicileState: { value: "Telangana", confidence: 0.99, rawSnippet: "Government of Telangana (Warangal)" }
+    };
+  } else if (personaId === "widow-pochamma" || personaId === "widow-lakshmi") {
+    profile = {
+      fullName: "Bandari Pochamma",
+      age: 61,
+      gender: "female",
+      occupation: "artisan",
+      estimatedAnnualIncome: 42000,
+      landOwnedAcres: 0,
+      socialCategory: "OBC",
+      state: "Telangana",
+      extractedDocumentType: "Telangana Food Security Card (White BPL)",
+      confidenceScore: 97,
+      aadhaarMasked: "XXXX-XXXX-3342",
+      sha256VerificationHash: "0x91F5B08E...TG"
+    };
+    metadata = {
+      detectedType: "Telangana Food Security Card (White BPL)",
+      issuingState: "Telangana",
+      documentId: "TG-FSC-W-2026-3342",
+      overallConfidence: 0.97
+    };
+    attributes = {
+      fullName: { value: "Bandari Pochamma", confidence: 0.97, rawSnippet: "Head of Household: Bandari Pochamma" },
+      age: { value: 61, confidence: 0.95, rawSnippet: "Age: 61 Years (Senior Citizen)" },
+      gender: { value: "female", confidence: 0.99, rawSnippet: "Sex: Female" },
+      occupation: { value: "artisan", confidence: 0.94, rawSnippet: "Occupation: Beedi Worker / Rural Artisan" },
+      annualIncome: { value: 42000, confidence: 0.96, rawSnippet: "Declared Annual Income: ₹42,000" },
+      landHoldingAcres: { value: 0, confidence: 1.0, rawSnippet: "Landless Rural Household" },
+      socialCategory: { value: "OBC", confidence: 0.98, rawSnippet: "Category: Backward Class (BC-A)" },
+      domicileState: { value: "Telangana", confidence: 0.99, rawSnippet: "Government of Telangana (Karimnagar)" }
+    };
+  } else {
+    // Default: Komaram Mallesh (Farmer, Siddipet)
+    profile = {
+      fullName: "Komaram Mallesh",
+      age: 52,
+      gender: "male",
+      occupation: "farmer",
+      estimatedAnnualIncome: 140000,
+      landOwnedAcres: 2.2,
+      socialCategory: "OBC",
+      state: "Telangana",
+      extractedDocumentType: "Telangana Dharani Pattadar Passbook (ROR-1B)",
+      confidenceScore: 99,
+      aadhaarMasked: "XXXX-XXXX-4912",
+      sha256VerificationHash: "0x7E3A91FC...TG"
+    };
+    metadata = {
+      detectedType: "Telangana Dharani Pattadar Passbook (ROR-1B)",
+      issuingState: "Telangana",
+      documentId: "TG-DHARANI-2026-78912",
+      overallConfidence: 0.99
+    };
+    attributes = {
+      fullName: { value: "Komaram Mallesh", confidence: 0.99, rawSnippet: "Pattadar Name: Komaram Mallesh" },
+      age: { value: 52, confidence: 0.93, rawSnippet: "Age: 52 Years" },
       gender: { value: "male", confidence: 0.99, rawSnippet: "Sex: Male" },
-      occupation: { value: "farmer", confidence: 0.99, rawSnippet: "Occupation: Agricultural Landholder" },
-      annualIncome: { value: 145000, confidence: 0.96, rawSnippet: "Declared Annual Crop Income: ₹1,45,000" },
-      landHoldingAcres: { value: 1.8, confidence: 0.99, rawSnippet: "Total Land Area: 1.80 Hectares / Acres" },
-      socialCategory: { value: "OBC", confidence: 0.98, rawSnippet: "Social Category: OBC" },
-      domicileState: { value: "Madhya Pradesh", confidence: 0.99, rawSnippet: "Government of Madhya Pradesh" }
+      occupation: { value: "farmer", confidence: 0.99, rawSnippet: "Occupation: Agriculture / Cultivator" },
+      annualIncome: { value: 140000, confidence: 0.96, rawSnippet: "Annual Crop Revenue: ₹1,40,000" },
+      landHoldingAcres: { value: 2.2, confidence: 0.99, rawSnippet: "Total Cultivable Land: 2.20 Acres (Survey No. 142/A)" },
+      socialCategory: { value: "OBC", confidence: 0.98, rawSnippet: "Category: BC-B (Kuruma)" },
+      domicileState: { value: "Telangana", confidence: 0.99, rawSnippet: "Government of Telangana (Siddipet District)" }
     };
   }
 
